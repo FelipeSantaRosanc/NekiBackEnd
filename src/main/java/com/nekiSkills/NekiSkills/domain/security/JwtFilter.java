@@ -1,0 +1,91 @@
+package com.nekiSkills.NekiSkills.domain.security;
+
+import java.io.IOException;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import com.auth0.jwt.exceptions.JWTVerificationException;
+import com.nekiSkills.NekiSkills.domain.service.impl.UsuarioDetailsServiceImpl;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+@Component
+public class JwtFilter extends OncePerRequestFilter {
+
+  @Autowired
+  private UsuarioDetailsServiceImpl userDetailsService;
+
+  @Autowired
+  private JwtUtil jwtUtil;
+
+  @Override
+  protected void doFilterInternal(
+    HttpServletRequest request,
+    HttpServletResponse response,
+    FilterChain filterChain
+  ) throws ServletException, IOException {
+    // Extrai, a partir do header da requisicao, o "Authorization header"
+    String authHeader = request.getHeader("Authorization");
+
+    // Checa se o "Auth header" contem um Bearer token
+    if (
+      authHeader != null &&
+      !authHeader.isBlank() &&
+      authHeader.startsWith("Bearer ")
+    ) {
+      // Extrai informacoes do JWT para valida-lo
+      String jwt = authHeader.substring(7);
+      if (jwt == null || jwt.isBlank()) {
+        // Se o JWT for invalido, aborta a requisicao
+        response.sendError(
+          HttpServletResponse.SC_BAD_REQUEST,
+          "Foi passado um Token JWT inválido no Bearer Header"
+        );
+      } else {
+        try {
+          // Verifica o token recebido e extrai o login
+          String login = jwtUtil.validateTokenAndRetrieveSubject(jwt);
+
+          // Coleta os dados do usuario a partir do login
+          UserDetails userDetails = userDetailsService.loadUserByUsername(
+            login
+          );
+
+          // Cria o Authentication Token
+          UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+            login,
+            userDetails.getPassword(),
+            userDetails.getAuthorities()
+          );
+
+          // Configura o Contexto de Seguranca com o token acima
+          if (SecurityContextHolder.getContext().getAuthentication() == null) {
+            SecurityContextHolder.getContext().setAuthentication(authToken);
+          }
+        } catch (JWTVerificationException exc) {
+          response.sendError(
+            HttpServletResponse.SC_BAD_REQUEST,
+            "Token JWT Inválido"
+          );
+        } catch (Exception e) {
+          response.sendError(
+            HttpServletResponse.SC_BAD_REQUEST,
+            "Não foi possível obter os dados do Usuario a partir do Token - " +
+            e
+          );
+        }
+      }
+    }
+
+    // Continua a execucao da cadeia de filtros (caso exista outros filtros definidos)
+    filterChain.doFilter(request, response);
+  }
+}
